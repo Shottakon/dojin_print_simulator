@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<head>
+  <!-- jQueryを使う準備 -->
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+</head>
+
+<body class='container'>
+  <h1>同人誌印刷シミュレータ</h1>
+
+  <form id='input' class='mb-2'>
+    <table class='table table-sm'>
+      <tr>
+        <td>部数</td>
+        <td>
+          <input type='number' name='circulation' min=0 value=100 class='form-control form-control-sm'>
+        </td>
+      </tr>
+      <tr>
+        <td>頁数</td>
+        <td>
+          <input type='number' name='page' min=0 value=24 class='form-control form-control-sm'>
+        </td>
+      </tr>
+    </table>
+  </form>
+
+  <div id='output'>
+    <div class='compare'>
+    </div>
+  </div>
+
+  <script type='text/javascript'>
+    // おまじないクラス
+    class PriceTable {
+      static createByCSV(csv) {
+        const table = csv.split('\n').map(l => l.split(','));
+
+        return new this(
+          table.slice(1).map(row => parseInt(row[0])), 
+          table[0].slice(1).map(v => parseInt(v)),
+          table.slice(1).map(row => row.slice(1).map(v => parseInt(v)))
+        );
+      }
+
+      constructor(circulations, pages, circulation_page_prices) {
+        if (!( Array.isArray(circulations) && circulations.every(v=> Number.isInteger(v)) ))
+          throw 'circulations must be Array of int';
+
+        if (!( Array.isArray(pages) && pages.every(v=> Number.isInteger(v)) ))
+          throw 'pages must be Array of int';
+
+        if (!(
+          Array.isArray(circulation_page_prices) && 
+          circulation_page_prices.every(page_prices=> Array.isArray(page_prices)) && 
+          circulation_page_prices.every(page_prices=> page_prices.every(price=> Number.isInteger(price)))
+          ))
+          throw 'circulation_page_prices must be 2 dimentional Array of int';
+
+        if (circulation_page_prices.length !== circulations.length)
+          throw 'circulation_page_prices\'s rank1 length must be eq circulation.length';
+
+        if (!circulation_page_prices.every(page_prices=> page_prices.length === pages.length))
+          throw 'circulation_page_prices\'s rank2 length must be eq pages.length';
+
+        this._circulations = circulations;
+        this._pages = pages;
+        this._circulation_page_prices = circulation_page_prices;
+      }
+
+      fetchPrice(circulation, page) {
+        if (circulation <= 0 || page <= 0) return -1;
+        
+        const i = this._circulations.findIndex(c => circulation <= c);
+        const j = this._pages.findIndex(p => page <= p);
+
+        if (
+          0 <= i-1 && i < this._circulations.length
+          && 0 <= j && j < this._pages.length
+          ) { 
+          const circulation1 = this._circulations[i-1];
+          const circulation2 = this._circulations[i  ];
+          const price1 = this._circulation_page_prices[i-1][j];
+          const price2 = this._circulation_page_prices[i  ][j];
+          
+          return Math.ceil(1.0 * (circulation-circulation1)/(circulation2-circulation1) * (price2-price1) + price1);
+        } else if (
+          circulation === this._circulations[i]
+          && 0 <= j && j < this._pages.length
+          ) {
+          
+          return this._circulation_page_prices[i][j];
+        } else {
+          return -1;
+        }
+      }
+    }
+    // おまじないクラス おわり
+
+    function delimiterize(val) {
+      return val.toString().replace(/^([+-]?\d{1,3})((?:\d{3})+)((?:\.\d*)?)$/g, (_, m1, m2, m3)=> m1+m2.replace(/\d{3}/g, ',$&')+m3);
+    }
+
+    $(async function() {
+      const plans = [
+        {
+          company: 'サングループ',
+          name: 'MG Pack Mark - I',
+          priceTable: PriceTable.createByCSV(await fetch('/files/sungroup_prices.csv').then(res=> res.text())), // おまじないを使って価格表を作成
+        },
+        {
+          company: 'サングループ',
+          name: 'MG Pack Mark - I',
+          priceTable: PriceTable.createByCSV(await fetch('/files/sungroup_prices.csv').then(res=> res.text())), // おまじないを使って価格表を作成
+        }
+      ];
+
+      // input関係のフィールド
+      const $circulationField = $('#input [name=circulation]');
+      const $pageField        = $('#input [name=page]');
+
+      // output関係のフィールド
+      const $compare = $('#output .compare');
+
+      function refreshOutput() {
+        const circulation = parseInt($circulationField.val());
+        const page = parseInt($pageField.val());
+
+        $compare.empty();
+
+        const $deck = $(`
+          <div class='card-deck'></div>
+        `).appendTo($compare);
+
+        plans.forEach(plan => {
+          // ここで計算処理をする
+          const price = plan.priceTable.fetchPrice(circulation, page); // おまじないから価格を抽出
+          const unitPrice = price / circulation;
+
+          $deck.append(`
+            <div class='card'>
+              <div class='card-body'>
+                <h4 class='card-title'>${plan.name}</h4>
+                <h6 class='card-subtitle mb-2 text-muted'>${plan.company}</h6>
+                
+                <table class='card-text table table-sm'>
+                  <tr>
+                    <td>印刷費:</td>
+                    <td class='text-right'>${delimiterize(price)} 円</td>
+                  </tr>
+                  <tr>
+                    <td>単価:</td>
+                    <td class='text-right'>${delimiterize( Math.round(unitPrice) )} 円</td>
+                  </tr>
+                </table>
+              </div>
+            </div>
+          `)
+        });
+      }
+
+      refreshOutput();
+      $circulationField.on('change', refreshOutput);
+      $pageField.on('change', refreshOutput);
+    })
+  </script>
+</body>
